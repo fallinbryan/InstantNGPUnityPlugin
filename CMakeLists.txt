@@ -8,9 +8,9 @@
 
 cmake_minimum_required(VERSION 3.18)
 
-project(instant-ngp
+project(unity-ngpp
 	VERSION 1.0
-	DESCRIPTION "Instant Neural Graphics Primitives"
+	DESCRIPTION "Unity Instant Neural Graphics Primitives Plugin"
 	LANGUAGES C CXX CUDA
 )
 set(NGP_VERSION "${CMAKE_PROJECT_VERSION}")
@@ -19,13 +19,13 @@ if (NOT NGP_DEPLOY)
 	set(NGP_VERSION "${NGP_VERSION}dev")
 endif()
 
-option(NGP_BUILD_EXECUTABLE "Build instant-ngp.exe?" ON)
+option(NGP_BUILD_UNITY_PLUGIN "Build unityngpp.dll?" ON)
 option(NGP_BUILD_WITH_GUI "Build with GUI support (requires GLFW and GLEW)?" ON)
 option(NGP_BUILD_WITH_OPTIX "Build with OptiX to enable hardware ray tracing?" ON)
-option(NGP_BUILD_WITH_PYTHON_BINDINGS "Build bindings that allow instrumenting instant-ngp with Python?" ON)
 option(NGP_BUILD_WITH_VULKAN "Build with Vulkan to enable DLSS support?" ON)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+
 
 ###############################################################################
 # Build type and C++ compiler setup
@@ -84,6 +84,10 @@ list(APPEND CUDA_NVCC_FLAGS "--use_fast_math")
 ###############################################################################
 # Dependencies
 ###############################################################################
+
+# Include the Eigen headers
+include_directories(C:/Users/falli/Projects/lib/eigen-3.4.0)
+
 
 set(TCNN_BUILD_BENCHMARK OFF)
 set(TCNN_BUILD_EXAMPLES OFF)
@@ -353,34 +357,27 @@ if (MSVC)
 	endif()
 endif()
 
-if (NGP_BUILD_EXECUTABLE)
-	add_executable(instant-ngp src/main.cu)
-	target_link_libraries(instant-ngp PRIVATE ngp)
 
-	# Link the executable to the project directory and copy over DLLs such that instant-ngp can be invoked without going into the build folder.
-	set(NGP_BINARY_FILE "\"${CMAKE_CURRENT_SOURCE_DIR}/$<TARGET_FILE_NAME:instant-ngp>\"")
+if (NGP_BUILD_UNITY_PLUGIN)
+	add_library(unityngpp SHARED src/unity.cu)
+	target_link_libraries(unityngpp PRIVATE ngp)
+
+	# Link the executable to the project directory and copy over DLLs such that unityngpp can be invoked without going into the build folder.
+	set(NGP_BINARY_FILE "\"${CMAKE_CURRENT_SOURCE_DIR}/$<TARGET_FILE_NAME:unityngpp>\"")
 	if (MSVC)
-		add_custom_command(TARGET instant-ngp POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:instant-ngp> ${CMAKE_CURRENT_SOURCE_DIR})
+		add_custom_command(TARGET unityngpp POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:unityngpp> ${CMAKE_CURRENT_SOURCE_DIR})
 		file(GLOB NGP_REQUIRED_DLLS "${CUDA_COMPILER_BIN}/cudart64*.dll")
 		if (NGP_VULKAN)
 			list(APPEND NGP_REQUIRED_DLLS "${NGX_SHARED_LIB}")
 		endif()
 		if (NGP_REQUIRED_DLLS)
-			add_custom_command(TARGET instant-ngp POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${NGP_REQUIRED_DLLS} ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_EXPAND_LISTS)
+			add_custom_command(TARGET unityngpp POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${NGP_REQUIRED_DLLS} ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_EXPAND_LISTS)
 		endif()
 	else()
-		add_custom_command(TARGET instant-ngp POST_BUILD COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE:instant-ngp> "${NGP_BINARY_FILE}")
+		add_custom_command(TARGET unityngpp POST_BUILD COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE:unityngpp> "${NGP_BINARY_FILE}")
 
 		if (NGP_VULKAN)
-			add_custom_command(TARGET instant-ngp POST_BUILD COMMAND "ln" -s -f "${NGX_SHARED_LIB}" "${CMAKE_CURRENT_SOURCE_DIR}/")
+			add_custom_command(TARGET unityngpp POST_BUILD COMMAND "ln" -s -f "${NGX_SHARED_LIB}" "${CMAKE_CURRENT_SOURCE_DIR}/")
 		endif()
 	endif()
-endif(NGP_BUILD_EXECUTABLE)
-
-if (Python_FOUND)
-	add_library(pyngp SHARED src/python_api.cu)
-	set_target_properties(pyngp PROPERTIES CXX_VISIBILITY_PRESET "hidden" CUDA_VISIBILITY_PRESET "hidden")
-	target_link_libraries(pyngp PRIVATE ngp PUBLIC ${PYTHON_LIBRARIES} pybind11::module)
-	target_compile_definitions(pyngp PUBLIC -DNGP_PYTHON)
-	pybind11_extension(pyngp)
-endif()
+endif(NGP_BUILD_UNITY_PLUGIN)

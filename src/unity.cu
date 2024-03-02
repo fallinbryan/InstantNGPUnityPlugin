@@ -6,12 +6,13 @@
 #include <neural-graphics-primitives/dlss.h>
 #include <neural-graphics-primitives/render_buffer.h>
 #include <memory>
-#include <Eigen>
+#include <Eigen/Core>
 
 #define API __stdcall
 #define EXPORT __declspec(dllexport)
 
-// !!! TODO: REMOVE #define NGP_UI from render_buffer.h  !!!
+
+
 
 
 
@@ -30,13 +31,13 @@ struct TextureData {
 		const Texture& c_tex,
 		const Texture& d_tex,
 		const RenderBuffer& c_rb,
-		int widht, int height
+		int w, int h
 	) :
 		color_texture(c_tex),
 		depth_texture(d_tex),
 		render_buffer(c_rb),
-		width(widht),
-		height(height)
+		width(w),
+		height(h)
 	{}
 
 	Texture color_texture;
@@ -46,7 +47,18 @@ struct TextureData {
 	int height;
 };
 
+
+static void API on_render_thread(int event_id);
+static void API init_graphics();
+static void API destroy();
+static TextureHandles API create_texture(int width, int height);
+extern "C" EXPORT void API destroy_texture();
+static void API update_texture();
+static void API destroy_vulkan();
+
+
 std::shared_ptr<TextureData> textures;
+//TextureData* textures = nullptr;
 
 const int INIT_EVENT = 0x0001;
 const int DRAW_EVENT = 0x0002;
@@ -77,7 +89,7 @@ static void API on_render_thread(int event_id)
 	switch (event_id)
 	{
 	case INIT_EVENT:
-		init();
+		init_graphics();
 		break;
 	case DRAW_EVENT:
 		update_texture();
@@ -94,38 +106,6 @@ static void API on_render_thread(int event_id)
 		destroy_vulkan();
 		break;
 	}
-}
-
-static void API init()
-{
-
-	//Init NGP
-
-}
-
-
-extern "C" void EXPORT API destroy_texture()
-{
-	if(!testbed)
-	{
-		std::cout << "Testbed not initialized" << std::endl;
-		return;
-	}
-	auto texture = textures;
-
-	if (texture == nullptr) {
-		std::cout << "Texture not found" << std::endl;
-		return;
-	}
-
-	texture->render_buffer->reset_accumulation();
-	texture->render_buffer.reset();
-	texture.reset();
-
-	std::cout << "GLTexture and render buffer destroyed" << std::endl;
-
-
-	
 }
 
 static void API destroy()
@@ -151,7 +131,8 @@ static TextureHandles API create_texture(int width, int height)
 	auto c_texture = std::make_shared<ngp::GLTexture>();
 	auto d_texture = std::make_shared<ngp::GLTexture>();
 	auto render_buffer = std::make_shared<ngp::CudaRenderBuffer>(c_texture, d_texture);
-	Eigen::Vector2i render_resolution{ width, height };
+	Eigen::Vector2i render_resolution_cpy{ width, height };
+	tcnn::ivec2 render_resolution{ width, height };
 
 #if defined(NGP_VULKAN)
 	if (use_dlss) {
@@ -160,14 +141,16 @@ static TextureHandles API create_texture(int width, int height)
 
 		Eigen::Vector2i texture_resolution{ width, height };
 		render_resolution = render_buffer->in_resolution();
-		if (render_resolution.isZero()) {
-			render_resolution = texture_resolution / 16;
+		render_resolution_cpy = { render_resolution.y, render_resolution.x };
+		if (render_resolution_cpy.isZero()) {
+			render_resolution_cpy = texture_resolution / 16;
 		}
 		else {
-			render_resolution = render_resolution.cwiseMin(texture_resolution);
+			render_resolution_cpy = render_resolution_cpy.cwiseMin(texture_resolution);
 		}
 
 		if (render_buffer->dlss()) {
+			render_resolution = { render_resolution_cpy.x(), render_resolution_cpy.y()};
 			render_resolution = render_buffer->dlss()->clamp_resolution(render_resolution);
 		}
 
@@ -185,8 +168,8 @@ static TextureHandles API create_texture(int width, int height)
 	GLuint d_handle = d_texture->texture();
 
 	textures = std::make_shared<TextureData>(
-		c_handle,
-		d_handle,
+		c_texture,
+		d_texture,
 		render_buffer,
 		width,
 		height
@@ -210,7 +193,9 @@ void API update_texture() {
 		return;
 	}
 
-	Eigen::Matrix<float, 3, 4> camera{ view_matrix };
+	//Eigen::Matrix<float, 3, 4> eign_camera{ view_matrix };
+	tcnn::mat4x3 camera{ view_matrix };
+	tcnn::vec2::zero();
 
 	RenderBuffer render_buffer = color->render_buffer;
 	
@@ -222,9 +207,9 @@ void API update_texture() {
 		camera,
 		camera,
 		camera,
-		Eigen::Vector4f::Zero(),
+		tcnn::vec2::zero(),
 		testbed->m_relative_focal_length,
-		Eigen::Vector4f::Zero(),
+		tcnn::vec2::zero(),
 		{},
 		{},
 		testbed->m_visualized_dimension,
@@ -261,8 +246,10 @@ extern "C" EXPORT void API setup_initialization_params(
 
 	testbed = std::make_shared<ngp::Testbed>(ngp::ETestbedMode::Nerf, scene);
 
+	filesystem::path snapshot_path = snapshot;
+
 	if (snapshot)
-		testbed->load_snapshot(snapshot);
+		testbed->load_snapshot(snapshot_path);
 }
 
 static void API init_graphics()
@@ -297,6 +284,28 @@ static void API init_graphics()
 	graphics_initialized = true;
 }
 
+
+extern "C" EXPORT void API destroy_texture()
+{
+	if (!testbed)
+	{
+		std::cout << "Testbed not initialized" << std::endl;
+		return;
+	}
+	auto texture = textures;
+
+	if (texture == nullptr) {
+		std::cout << "Texture not found" << std::endl;
+		return;
+	}
+
+	texture->render_buffer->reset_accumulation();
+	texture->render_buffer.reset();
+	texture.reset();
+
+	std::cout << "GLTexture and render buffer destroyed" << std::endl;
+
+}
 
 extern "C" RenderingEvent EXPORT API GetRenderEventFunc()
 {
